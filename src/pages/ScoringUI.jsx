@@ -1,13 +1,11 @@
 import { useEffect, useRef } from 'react';
 import {
   ref as dbRef,
-  get,
   set,
   push,
   remove,
   runTransaction,
   onValue,
-  off,
 } from 'firebase/database';
 import { db } from '../firebase';
 import { useStore } from '../store/useStore';
@@ -33,23 +31,37 @@ export default function ScoringUI() {
   useEffect(() => { refereeIdRef.current = refereeId; }, [refereeId]);
   useEffect(() => { myNameRef.current = myName; }, [myName]);
 
-  // Score listener (log only — scoreboard shows scores)
+  // In-memory cache of room data and submissions — updated by onValue listeners
+  const roomDataRef = useRef(null);
+  const subsDataRef = useRef({});
+
+  // Persistent real-time listeners: one WebSocket connection, zero polling reads
   useEffect(() => {
     if (!currentRoomId) return;
-    const roomRef = dbRef(db, `rooms/${currentRoomId}`);
-    const unsubscribe = onValue(roomRef, (snapshot) => {
-      const data = snapshot.val();
-      if (!data) return;
-      const hong = data.teamA?.score || 0;
-      const chong = data.teamB?.score || 0;
-      console.log(`Score update — Hong: ${hong}, Chong: ${chong}`);
+
+    const unsubRoom = onValue(dbRef(db, `rooms/${currentRoomId}`), (snap) => {
+      roomDataRef.current = snap.val();
     });
-    return () => unsubscribe();
+
+    const unsubSubs = onValue(dbRef(db, `rooms/${currentRoomId}/submissions`), (snap) => {
+      subsDataRef.current = snap.val() || {};
+    });
+
+    return () => {
+      unsubRoom();
+      unsubSubs();
+    };
   }, [currentRoomId]);
 
-  // Validation interval (leader device only)
+  // Validation interval — reads from in-memory cache, no network calls
   const validateRef = useRef(null);
-  validateRef.current = () => validateSubmissions(roomIdRef.current, refereeIdRef.current, myNameRef.current);
+  validateRef.current = () =>
+    validateSubmissions(
+      roomIdRef.current,
+      refereeIdRef.current,
+      roomDataRef.current,
+      subsDataRef.current,
+    );
 
   useEffect(() => {
     if (!currentRoomId) return;
@@ -253,98 +265,86 @@ function submitPoints(currentRoomId, refereeId, myName, sectionEl, player, point
     refereeId,
     timestamp: Date.now(),
   }).catch(console.error);
-
-  console.log(`Points submitted: ${points} for ${player} (${action}) by referee ${refereeId}`);
 }
 
-async function validateSubmissions(currentRoomId, refereeId) {
-  if (!currentRoomId) return;
+// Synchronous — data comes from in-memory cache (no network calls in hot path)
+function validateSubmissions(currentRoomId, refereeId, data, subsRaw) {
+  if (!currentRoomId || !data) return;
 
-  try {
-    const roomSnap = await get(dbRef(db, `rooms/${currentRoomId}`));
-    const data = roomSnap.val();
-    if (!data) return;
+  const referees = data.referees || {};
+  const refereeIds = Object.keys(referees).sort();
+  const leaderId = refereeIds[0];
+  const refereeCount = refereeIds.length;
+  const now = Date.now();
+  const SYNC_WINDOW_MS = 5000;
+  const isTimerRunning = !!(data.timer && data.timer.running);
 
-    const referees = data.referees || {};
-    const refereeIds = Object.keys(referees).sort();
-    const leaderId = refereeIds[0];
-    const refereeCount = refereeIds.length;
-    const now = Date.now();
-    const SYNC_WINDOW_MS = 5000;
-    const isTimerRunning = !!(data.timer && data.timer.running);
+  if (refereeId !== leaderId) return;
 
-    if (refereeId !== leaderId) return;
+  const subs = Object.entries(subsRaw).map(([key, v]) => ({ key, ...v }));
+  if (subs.length === 0) return;
 
-    const subSnap = await get(dbRef(db, `rooms/${currentRoomId}/submissions`));
-    const subsRaw = subSnap.val() || {};
-    const subs = Object.entries(subsRaw).map(([key, v]) => ({ key, ...v }));
+  // Group by player + points + action
+  const groups = {};
+  subs.forEach((s) => {
+    if (!s.player || !s.action || typeof s.points === 'undefined' || !s.refereeId) return;
+    const groupKey = `${s.player}__${s.points}__${s.action}`;
+    groups[groupKey] = groups[groupKey] || [];
+    groups[groupKey].push(s);
+  });
 
-    if (subs.length === 0) return;
+  const keysToRemove = new Set();
 
-    // Group by player + points + action
-    const groups = {};
-    subs.forEach((s) => {
-      if (!s.player || !s.action || typeof s.points === 'undefined' || !s.refereeId) return;
-      const groupKey = `${s.player}__${s.points}__${s.action}`;
-      groups[groupKey] = groups[groupKey] || [];
-      groups[groupKey].push(s);
-    });
+  for (const [, groupSubs] of Object.entries(groups)) {
+    groupSubs.sort((a, b) => a.timestamp - b.timestamp);
 
-    const keysToRemove = new Set();
+    const earliest = groupSubs[0];
+    const sampleImage = earliest.image || '';
+    const sampleRefName =
+      (data.referees?.[earliest.refereeId]?.name) || earliest.refereeId || '';
 
-    for (const [, groupSubs] of Object.entries(groups)) {
-      groupSubs.sort((a, b) => a.timestamp - b.timestamp);
+    // Update lastAction so scoreboard shows image + referee name
+    const teamKey = earliest.player === 'red' ? 'hong' : 'chong';
+    set(dbRef(db, `rooms/${currentRoomId}/lastAction/${teamKey}`), {
+      image: sampleImage,
+      refereeName: sampleRefName,
+      timestamp: Date.now(),
+      sourceTeam: earliest.player,
+    }).catch(console.error);
 
-      const earliest = groupSubs[0];
-      const sampleImage = earliest.image || '';
-      const sampleRefName =
-        (data.referees?.[earliest.refereeId]?.name) || earliest.refereeId || '';
+    groupSubs.forEach((s) => keysToRemove.add(s.key));
 
-      // Update lastAction so scoreboard shows image + referee name
-      const teamKey = earliest.player === 'red' ? 'hong' : 'chong';
-      set(dbRef(db, `rooms/${currentRoomId}/lastAction/${teamKey}`), {
-        image: sampleImage,
-        refereeName: sampleRefName,
-        timestamp: Date.now(),
-        sourceTeam: earliest.player,
-      }).catch(console.error);
+    if (!isTimerRunning) continue;
 
-      groupSubs.forEach((s) => keysToRemove.add(s.key));
+    const uniqueRefereeIds = [...new Set(groupSubs.map((s) => s.refereeId))];
+    const uniqueCount = uniqueRefereeIds.length;
+    const spread = groupSubs[groupSubs.length - 1].timestamp - groupSubs[0].timestamp;
 
-      if (!isTimerRunning) continue;
-
-      const uniqueRefereeIds = [...new Set(groupSubs.map((s) => s.refereeId))];
-      const uniqueCount = uniqueRefereeIds.length;
-      const spread = groupSubs[groupSubs.length - 1].timestamp - groupSubs[0].timestamp;
-
-      let shouldAward = false;
-      if (refereeCount <= 1) {
-        if (uniqueCount >= 1) shouldAward = true;
-      } else if (refereeCount === 2) {
-        if (uniqueCount === 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
-      } else {
-        if (uniqueCount >= 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
-      }
-
-      if (shouldAward) {
-        awardPoints(currentRoomId, groupSubs[0].player, groupSubs[0].points);
-      }
+    let shouldAward = false;
+    if (refereeCount <= 1) {
+      if (uniqueCount >= 1) shouldAward = true;
+    } else if (refereeCount === 2) {
+      if (uniqueCount === 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
+    } else {
+      if (uniqueCount >= 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
     }
 
-    keysToRemove.forEach((k) => {
-      if (!k) return;
-      remove(dbRef(db, `rooms/${currentRoomId}/submissions/${k}`)).catch(console.error);
-    });
-
-    // Clean expired submissions
-    subs.forEach((s) => {
-      if (now - s.timestamp > SYNC_WINDOW_MS * 2) {
-        remove(dbRef(db, `rooms/${currentRoomId}/submissions/${s.key}`)).catch(console.error);
-      }
-    });
-  } catch (err) {
-    console.error('Validation error:', err);
+    if (shouldAward) {
+      awardPoints(currentRoomId, groupSubs[0].player, groupSubs[0].points);
+    }
   }
+
+  keysToRemove.forEach((k) => {
+    if (!k) return;
+    remove(dbRef(db, `rooms/${currentRoomId}/submissions/${k}`)).catch(console.error);
+  });
+
+  // Clean expired submissions
+  subs.forEach((s) => {
+    if (now - s.timestamp > SYNC_WINDOW_MS * 2) {
+      remove(dbRef(db, `rooms/${currentRoomId}/submissions/${s.key}`)).catch(console.error);
+    }
+  });
 }
 
 function awardPoints(currentRoomId, player, points) {
@@ -360,7 +360,8 @@ function awardPoints(currentRoomId, player, points) {
     const hongScore = room.teamA?.score || 0;
     const chongScore = room.teamB?.score || 0;
 
-    if (Math.abs(hongScore - chongScore) >= 12 && !room.roundDeclared) {
+    const pointGap = room.settings?.pointGap ?? 12
+    if (Math.abs(hongScore - chongScore) >= pointGap && !room.roundDeclared) {
       const winner = hongScore > chongScore ? 'hong' : 'chong';
       const currentRoundsWon = room[winner + 'RoundsWon'] || 0;
 
