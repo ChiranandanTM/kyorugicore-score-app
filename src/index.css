@@ -22,7 +22,9 @@ html {
   position: absolute;
   width: 100%;
   height: 100%;
-  background: url('/images/background1.jpg') no-repeat center center fixed;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.82) 100%),
+    url('/taekwondo-background.jpg') no-repeat center center;
   background-size: cover;
   display: flex;
   flex-direction: column;
@@ -30,42 +32,140 @@ html {
   align-items: center;
   z-index: 2;
   color: #fff;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+/* Glassmorphism login card */
+.login-card {
+  background: rgba(8, 10, 28, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 48px 36px 40px;
+  width: 90%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(255, 5, 5, 0.15),
+    0 0 60px rgba(255, 5, 5, 0.2),
+    0 0 100px rgba(5, 17, 252, 0.12),
+    0 30px 60px rgba(0, 0, 0, 0.55);
+}
+
+/* Red-white-blue top accent bar */
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: 22px 22px 0 0;
+  background: linear-gradient(90deg, #ff0505 0%, #ffffff 50%, #0511fc 100%);
+}
+
+.login-brand {
+  font-size: 0.7em;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 14px;
 }
 
 #roomEntry h2 {
   font-size: 2em;
-  margin-bottom: 20px;
+  font-weight: 800;
+  margin: 0 0 6px;
+  text-align: center;
+  letter-spacing: -0.5px;
+  text-shadow: 0 2px 12px rgba(255, 5, 5, 0.5);
+}
+
+.login-sub {
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0 0 28px;
+  text-align: center;
 }
 
 #roomEntry input {
-  padding: 12px;
-  font-size: 1em;
-  border: 2px solid #fff;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.9);
-  width: 80%;
-  max-width: 300px;
-  margin: 10px auto;
-  box-sizing: border-box;
-}
-
-#roomEntry button {
-  padding: 12px;
-  font-size: 1em;
-  border: none;
-  border-radius: 5px;
-  background: #007bff;
+  padding: 14px 16px;
+  font-size: 1.05em;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-align: center;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
-  width: 80%;
-  max-width: 300px;
-  margin: 10px auto;
-  cursor: pointer;
-  transition: background 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 14px;
+  outline: none;
+  transition: border-color 0.25s, background 0.25s;
 }
 
-#roomEntry button:hover {
-  background: #0056b3;
+#roomEntry input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+  letter-spacing: 1px;
+  font-weight: 400;
+}
+
+#roomEntry input:focus {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.btn-join {
+  width: 100%;
+  padding: 15px;
+  font-size: 1em;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #e00000 0%, #ff0505 50%, #cc0000 100%);
+  color: #fff;
+  cursor: pointer;
+  margin-bottom: 10px;
+  box-shadow: 0 4px 20px rgba(255, 5, 5, 0.45);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-join:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 28px rgba(255, 5, 5, 0.6);
+}
+
+.btn-join:active {
+  transform: translateY(0);
+}
+
+.btn-scan {
+  width: 100%;
+  padding: 14px;
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-scan:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+
+.scan-icon {
+  margin-right: 6px;
 }
 
 .container {
@@ -301,23 +401,16 @@ img {
   #roomEntry {
     width: 100vw;
     height: 100vh;
-    font-size: 16px;
     box-sizing: border-box;
-    padding: 20px;
+    padding: 16px;
+  }
+
+  .login-card {
+    padding: 36px 24px 28px;
   }
 
   #roomEntry h2 {
-    font-size: 1.5em;
-  }
-
-  #roomEntry input,
-  #roomEntry button {
-    font-size: 1em;
-    padding: 10px;
-    width: 80%;
-    max-width: 300px;
-    margin: 10px auto;
-    display: block;
+    font-size: 1.6em;
   }
 }
 
