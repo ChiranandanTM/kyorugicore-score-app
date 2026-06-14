@@ -270,9 +270,11 @@ function submitPoints(currentRoomId, refereeId, myName, sectionEl, player, point
   }).catch(console.error);
 }
 
-// Synchronous — data comes from in-memory cache (no network calls in hot path)
-function validateSubmissions(currentRoomId, refereeId, data, subsRaw) {
+let isValidating = false;
+
+async function validateSubmissions(currentRoomId, refereeId, data, subsRaw) {
   if (!currentRoomId || !data) return;
+  if (isValidating) return;
 
   const referees = data.referees || {};
   const refereeIds = Object.keys(referees).sort();
@@ -287,67 +289,77 @@ function validateSubmissions(currentRoomId, refereeId, data, subsRaw) {
   const subs = Object.entries(subsRaw).map(([key, v]) => ({ key, ...v }));
   if (subs.length === 0) return;
 
-  // Group by player + points + action
-  const groups = {};
-  subs.forEach((s) => {
-    if (!s.player || !s.action || typeof s.points === 'undefined' || !s.refereeId) return;
-    const groupKey = `${s.player}__${s.points}__${s.action}`;
-    groups[groupKey] = groups[groupKey] || [];
-    groups[groupKey].push(s);
-  });
+  isValidating = true;
+  try {
+    // Group by player + points + action
+    const groups = {};
+    subs.forEach((s) => {
+      if (!s.player || !s.action || typeof s.points === 'undefined' || !s.refereeId) return;
+      const groupKey = `${s.player}__${s.points}__${s.action}`;
+      groups[groupKey] = groups[groupKey] || [];
+      groups[groupKey].push(s);
+    });
 
-  const keysToRemove = new Set();
+    for (const [, groupSubs] of Object.entries(groups)) {
+      groupSubs.sort((a, b) => a.timestamp - b.timestamp);
 
-  for (const [, groupSubs] of Object.entries(groups)) {
-    groupSubs.sort((a, b) => a.timestamp - b.timestamp);
+      const earliest = groupSubs[0];
+      const sampleImage = earliest.image || '';
+      const sampleRefName = (data.referees?.[earliest.refereeId]?.name) || earliest.refereeId || '';
 
-    const earliest = groupSubs[0];
-    const sampleImage = earliest.image || '';
-    const sampleRefName =
-      (data.referees?.[earliest.refereeId]?.name) || earliest.refereeId || '';
+      const teamKey = earliest.player === 'red' ? 'hong' : 'chong';
+      set(dbRef(db, `rooms/${currentRoomId}/lastAction/${teamKey}`), {
+        image: sampleImage,
+        refereeName: sampleRefName,
+        timestamp: Date.now(),
+        sourceTeam: earliest.player,
+      }).catch(console.error);
 
-    // Update lastAction so scoreboard shows image + referee name
-    const teamKey = earliest.player === 'red' ? 'hong' : 'chong';
-    set(dbRef(db, `rooms/${currentRoomId}/lastAction/${teamKey}`), {
-      image: sampleImage,
-      refereeName: sampleRefName,
-      timestamp: Date.now(),
-      sourceTeam: earliest.player,
-    }).catch(console.error);
+      // Clean stale submissions regardless of award
+      groupSubs.forEach((s) => {
+        if (now - s.timestamp > SYNC_WINDOW_MS * 2) {
+          remove(dbRef(db, `rooms/${currentRoomId}/submissions/${s.key}`)).catch(console.error);
+        }
+      });
 
-    groupSubs.forEach((s) => keysToRemove.add(s.key));
+      if (!isTimerRunning) continue;
 
-    if (!isTimerRunning) continue;
+      const uniqueRefereeIds = [...new Set(groupSubs.map((s) => s.refereeId))];
+      const uniqueCount = uniqueRefereeIds.length;
+      const spread = groupSubs[groupSubs.length - 1].timestamp - groupSubs[0].timestamp;
 
-    const uniqueRefereeIds = [...new Set(groupSubs.map((s) => s.refereeId))];
-    const uniqueCount = uniqueRefereeIds.length;
-    const spread = groupSubs[groupSubs.length - 1].timestamp - groupSubs[0].timestamp;
+      let shouldAward = false;
+      if (refereeCount <= 1) {
+        if (uniqueCount >= 1) shouldAward = true;
+      } else if (refereeCount === 2) {
+        if (uniqueCount === 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
+      } else {
+        if (uniqueCount >= 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
+      }
 
-    let shouldAward = false;
-    if (refereeCount <= 1) {
-      if (uniqueCount >= 1) shouldAward = true;
-    } else if (refereeCount === 2) {
-      if (uniqueCount === 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
-    } else {
-      if (uniqueCount >= 2 && spread <= SYNC_WINDOW_MS) shouldAward = true;
+      if (!shouldAward) continue;
+
+      // Atomically claim ALL submissions in this group (including any extra 3rd referee).
+      // If the scoreboard already claimed them, the transaction aborts and we skip.
+      const allKeys = groupSubs.map((s) => s.key);
+      const sentinelKey = earliest.key;
+      try {
+        const result = await runTransaction(dbRef(db, `rooms/${currentRoomId}/submissions`), (currentSubs) => {
+          if (!currentSubs) return currentSubs;
+          if (currentSubs[sentinelKey] === undefined) return undefined; // already claimed — abort
+          allKeys.forEach((k) => { delete currentSubs[k]; });
+          return currentSubs;
+        });
+        if (result.committed) {
+          awardPoints(currentRoomId, earliest.player, earliest.points);
+        }
+      } catch (err) {
+        console.error('Submission claim transaction error:', err);
+      }
     }
-
-    if (shouldAward) {
-      awardPoints(currentRoomId, groupSubs[0].player, groupSubs[0].points);
-    }
+  } finally {
+    isValidating = false;
   }
-
-  keysToRemove.forEach((k) => {
-    if (!k) return;
-    remove(dbRef(db, `rooms/${currentRoomId}/submissions/${k}`)).catch(console.error);
-  });
-
-  // Clean expired submissions
-  subs.forEach((s) => {
-    if (now - s.timestamp > SYNC_WINDOW_MS * 2) {
-      remove(dbRef(db, `rooms/${currentRoomId}/submissions/${s.key}`)).catch(console.error);
-    }
-  });
 }
 
 function awardPoints(currentRoomId, player, points) {
