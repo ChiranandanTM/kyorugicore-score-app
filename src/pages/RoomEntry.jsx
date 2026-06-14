@@ -87,30 +87,17 @@ export default function RoomEntry() {
 
   return (
     <div id="roomEntry">
-      <div className="login-card">
-        <div className="login-brand">KYORUGI CORE</div>
-        <h2>Referee Login</h2>
-        <p className="login-sub">Enter your room code to join</p>
-
-        <input
-          type="text"
-          placeholder="e.g., 3F6XKP"
-          value={roomCode}
-          onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-          onKeyDown={handleKeyDown}
-        />
-        <button className="btn-join" onClick={handleJoin}>Join Room</button>
-        <button className="btn-scan" onClick={() => setShowScanner(true)}>
-          <span className="scan-icon">&#x1F4F7;</span> Scan QR Code
-        </button>
-      </div>
-
-      {showScanner && (
-        <QRScanner
-          onScan={handleScan}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
+      <h2>Enter Room Code</h2>
+      <input
+        type="text"
+        placeholder="e.g., 3F6XKP"
+        value={roomCode}
+        onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+        onKeyDown={handleKeyDown}
+      />
+      <button onClick={handleJoin}>Join Room</button>
+      <button onClick={() => setShowScanner(true)}>Scan QR Code</button>
+      {showScanner && <QRScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
     </div>
   );
 }
