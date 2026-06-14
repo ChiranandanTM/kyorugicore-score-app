@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kyorugi-referee-v2';
+const CACHE_NAME = 'kyorugi-referee-v3';
 const FILES_TO_CACHE = [
   '/',
   '/index.html',
@@ -10,13 +10,23 @@ self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
 
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
 
 self.addEventListener('fetch', (e) => {
+  const url = e.request.url;
   if (
-    e.request.url.includes('firebaseio.com') ||
-    e.request.url.includes('googleapis.com') ||
-    e.request.url.includes('gstatic.com')
+    url.includes('firebaseio.com') ||
+    url.includes('firebasedatabase.app') ||
+    url.includes('googleapis.com') ||
+    url.includes('gstatic.com') ||
+    url.includes('firebase') ||
+    e.request.method !== 'GET'
   ) {
     return;
   }
