@@ -81,6 +81,9 @@ export default function ScoringUI() {
     const container = containerRef.current;
     if (!container) return;
 
+    // Prevents the browser's synthetic click (fired after touchend) from submitting a second time
+    let lastTouchHandledAt = 0;
+
     function findConfig(target) {
       return SECTION_CONFIGS.find((c) => target.classList.contains(c.cls));
     }
@@ -114,6 +117,7 @@ export default function ScoringUI() {
       if (dx < 30 && dy < 30 && duration < 400) {
         const cfg = findConfig(target);
         if (cfg) {
+          lastTouchHandledAt = Date.now();
           submitPoints(roomIdRef.current, refereeIdRef.current, myNameRef.current, target, cfg.player, cfg.clickPoints, cfg.clickAction);
           target.classList.add('click-animation');
           setTimeout(() => target.classList.remove('click-animation'), 200);
@@ -123,10 +127,11 @@ export default function ScoringUI() {
 
       // Require: 130px+ horizontal, clearly more horizontal than vertical (2.5x),
       // fast enough to be intentional (not slow finger drift), and within 500ms
-      const speed = dx / (duration || 1)
+      const speed = dx / (duration || 1);
       if (dx > 130 && dx > dy * 2.5 && speed > 0.3 && duration < 500) {
         const cfg = SECTION_CONFIGS.find((c) => target.classList.contains(c.cls) && c.swipePoints);
         if (cfg) {
+          lastTouchHandledAt = Date.now();
           submitPoints(roomIdRef.current, refereeIdRef.current, myNameRef.current, target, cfg.player, cfg.swipePoints, cfg.swipeAction);
           const animCls = startX - endX > 0 ? 'swipe-animation-left' : 'swipe-animation-right';
           target.classList.add(animCls);
@@ -136,6 +141,8 @@ export default function ScoringUI() {
     }
 
     function onClick(e) {
+      // Block synthetic click that browsers fire after touchend — prevents double submission
+      if (Date.now() - lastTouchHandledAt < 500) return;
       const target = e.target.closest('.section');
       if (!target) return;
       e.preventDefault();
