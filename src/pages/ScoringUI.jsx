@@ -36,7 +36,6 @@ export default function ScoringUI() {
   // In-memory cache of room data and submissions — updated by onValue listeners
   const roomDataRef = useRef(null);
   const subsDataRef = useRef({});
-  const lastVibratedAwardRef = useRef(0);
 
   // Persistent real-time listeners: one WebSocket connection, zero polling reads
   useEffect(() => {
@@ -44,22 +43,10 @@ export default function ScoringUI() {
 
     const unsubRoom = onValue(dbRef(db, `rooms/${currentRoomId}`), (snap) => {
       roomDataRef.current = snap.val();
-      const val = snap.val();
-
       // Sync name if scoreboard renamed this referee
-      const liveNameFromDB = val?.referees?.[refereeId]?.name;
+      const liveNameFromDB = snap.val()?.referees?.[refereeId]?.name;
       if (liveNameFromDB && liveNameFromDB !== myNameRef.current) {
         setNameRef.current(liveNameFromDB);
-      }
-
-      // Vibrate only when THIS referee's submission was accepted and awarded
-      const lastAward = val?.lastAwardedReferees;
-      if (lastAward?.ids?.includes(refereeIdRef.current)) {
-        const awardTime = lastAward.timestamp || 0;
-        if (awardTime > lastVibratedAwardRef.current && Date.now() - awardTime < 2000) {
-          lastVibratedAwardRef.current = awardTime;
-          if (navigator.vibrate) navigator.vibrate(50);
-        }
       }
     });
 
@@ -371,7 +358,7 @@ async function validateSubmissions(currentRoomId, refereeId, data, subsRaw) {
           return currentSubs;
         });
         if (result.committed) {
-          awardPoints(currentRoomId, earliest.player, earliest.points, uniqueRefereeIds);
+          awardPoints(currentRoomId, earliest.player, earliest.points);
         }
       } catch (err) {
         console.error('Submission claim transaction error:', err);
@@ -382,7 +369,7 @@ async function validateSubmissions(currentRoomId, refereeId, data, subsRaw) {
   }
 }
 
-function awardPoints(currentRoomId, player, points, refereeIds = []) {
+function awardPoints(currentRoomId, player, points) {
   if (!currentRoomId) return;
 
   const teamKey = player === 'red' ? 'teamA' : 'teamB';
@@ -428,16 +415,7 @@ function awardPoints(currentRoomId, player, points, refereeIds = []) {
     }
 
     return room;
-  })
-  .then((result) => {
-    if (result.committed && refereeIds.length > 0) {
-      set(dbRef(db, `rooms/${currentRoomId}/lastAwardedReferees`), {
-        ids: refereeIds,
-        timestamp: Date.now(),
-      }).catch(console.error);
-    }
-  })
-  .catch((err) => console.error('Transaction error:', err));
+  }).catch((err) => console.error('Transaction error:', err));
 }
 
 function requestFullscreen() {
