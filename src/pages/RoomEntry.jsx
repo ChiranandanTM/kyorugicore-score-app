@@ -1,53 +1,72 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ref as dbRef, get, set } from 'firebase/database';
+import { ref as dbRef, get, set, runTransaction } from 'firebase/database';
 import { db } from '../firebase';
 import { useStore } from '../store/useStore';
 import QRScanner from '../components/QRScanner';
 
 export default function RoomEntry() {
   const [roomCode, setRoomCode] = useState('');
+  const [refereeName, setRefereeName] = useState('');
   const [showScanner, setShowScanner] = useState(false);
   const navigate = useNavigate();
   const { refereeId, setLoggedIn } = useStore();
 
   async function joinRoom(code) {
-    const roomCode = (code || '').trim().toUpperCase();
-    if (!roomCode) {
+    const trimmedCode = (code || '').trim().toUpperCase();
+    if (!trimmedCode) {
       alert('Please enter a room code.');
       return;
     }
 
     try {
-      const refereesSnap = await get(dbRef(db, `rooms/${roomCode}/referees`));
-      const referees = refereesSnap.val() || {};
-      const refereeCount = Object.keys(referees).length;
-
-      if (refereeCount >= 4 && !referees[refereeId]) {
-        alert('Maximum of 4 referees allowed in this room.');
-        return;
-      }
-
-      const roomSnap = await get(dbRef(db, `rooms/${roomCode}`));
+      const roomSnap = await get(dbRef(db, `rooms/${trimmedCode}`));
       if (!roomSnap.exists()) {
         alert('Invalid room code. Please try again.');
         return;
       }
 
-      let myName;
+      const referees = roomSnap.val()?.referees || {};
+
+      // Already in room: update name if changed, then proceed
       if (referees[refereeId]) {
-        myName = referees[refereeId].name;
-      } else {
-        myName = `Referee ${refereeCount + 1}`;
+        const myName = refereeName.trim() || referees[refereeId].name;
+        await set(dbRef(db, `rooms/${trimmedCode}/referees/${refereeId}`), {
+          ...referees[refereeId],
+          name: myName,
+        });
+        setLoggedIn(trimmedCode, myName);
+        requestFullscreen();
+        navigate('/scoring');
+        return;
       }
 
-      await set(dbRef(db, `rooms/${roomCode}/referees/${refereeId}`), {
+      // New referee: enforce max 4
+      if (Object.keys(referees).length >= 4) {
+        alert('Maximum of 4 referees allowed in this room.');
+        return;
+      }
+
+      // Atomically claim the next sequential number
+      const counterResult = await runTransaction(
+        dbRef(db, `rooms/${trimmedCode}/refereeCounter`),
+        (current) => (current || 0) + 1,
+      );
+
+      if (!counterResult.committed) {
+        throw new Error('Failed to claim referee number');
+      }
+
+      const assignedNumber = counterResult.snapshot.val();
+      const myName = refereeName.trim() || `Referee ${assignedNumber}`;
+
+      await set(dbRef(db, `rooms/${trimmedCode}/referees/${refereeId}`), {
         joined: Date.now(),
         name: myName,
+        number: assignedNumber,
       });
 
-      setLoggedIn(roomCode, myName);
-
+      setLoggedIn(trimmedCode, myName);
       requestFullscreen();
       navigate('/scoring');
     } catch (err) {
@@ -73,6 +92,12 @@ export default function RoomEntry() {
   return (
     <div id="roomEntry">
       <h2>Enter Room Code</h2>
+      <input
+        type="text"
+        placeholder="Your name (optional)"
+        value={refereeName}
+        onChange={(e) => setRefereeName(e.target.value)}
+      />
       <input
         type="text"
         placeholder="e.g., 3F6XKP"
