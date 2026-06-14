@@ -20,16 +20,18 @@ const SECTION_CONFIGS = [
 ];
 
 export default function ScoringUI() {
-  const { refereeId, myName, currentRoomId } = useStore();
+  const { refereeId, myName, currentRoomId, setName } = useStore();
   const containerRef = useRef(null);
 
   // Keep mutable refs so event handlers always have latest values
   const roomIdRef = useRef(currentRoomId);
   const refereeIdRef = useRef(refereeId);
   const myNameRef = useRef(myName);
+  const setNameRef = useRef(setName);
   useEffect(() => { roomIdRef.current = currentRoomId; }, [currentRoomId]);
   useEffect(() => { refereeIdRef.current = refereeId; }, [refereeId]);
   useEffect(() => { myNameRef.current = myName; }, [myName]);
+  useEffect(() => { setNameRef.current = setName; }, [setName]);
 
   // In-memory cache of room data and submissions — updated by onValue listeners
   const roomDataRef = useRef(null);
@@ -41,6 +43,11 @@ export default function ScoringUI() {
 
     const unsubRoom = onValue(dbRef(db, `rooms/${currentRoomId}`), (snap) => {
       roomDataRef.current = snap.val();
+      // Sync name if scoreboard renamed this referee
+      const liveNameFromDB = snap.val()?.referees?.[refereeId]?.name;
+      if (liveNameFromDB && liveNameFromDB !== myNameRef.current) {
+        setNameRef.current(liveNameFromDB);
+      }
     });
 
     const unsubSubs = onValue(dbRef(db, `rooms/${currentRoomId}/submissions`), (snap) => {

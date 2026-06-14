@@ -20,6 +20,11 @@ export const useStore = create((set) => ({
     set({ isLoggedIn: true, currentRoomId: roomId, myName: name });
   },
 
+  setName: (name) => {
+    sessionStorage.setItem('myName', name);
+    set({ myName: name });
+  },
+
   logout: () => {
     sessionStorage.removeItem('isLoggedIn');
     sessionStorage.removeItem('currentRoomId');
