@@ -7,10 +7,14 @@ import QRScanner from '../components/QRScanner';
 
 export default function RoomEntry() {
   const [roomCode, setRoomCode] = useState('');
-  const [refereeName, setRefereeName] = useState('');
   const [showScanner, setShowScanner] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [customName, setCustomName] = useState('');
   const navigate = useNavigate();
-  const { refereeId, setLoggedIn } = useStore();
+  const { refereeId, myName, setLoggedIn } = useStore();
+
+  // Show custom name if typed, else stored name, else placeholder
+  const displayName = customName || myName || '';
 
   async function joinRoom(code) {
     const trimmedCode = (code || '').trim().toUpperCase();
@@ -28,45 +32,42 @@ export default function RoomEntry() {
 
       const referees = roomSnap.val()?.referees || {};
 
-      // Already in room: update name if changed, then proceed
+      // Already in room — update name if changed, then proceed
       if (referees[refereeId]) {
-        const myName = refereeName.trim() || referees[refereeId].name;
+        const finalName = displayName || referees[refereeId].name;
         await set(dbRef(db, `rooms/${trimmedCode}/referees/${refereeId}`), {
           ...referees[refereeId],
-          name: myName,
+          name: finalName,
         });
-        setLoggedIn(trimmedCode, myName);
+        setLoggedIn(trimmedCode, finalName);
         requestFullscreen();
         navigate('/scoring');
         return;
       }
 
-      // New referee: enforce max 4
       if (Object.keys(referees).length >= 4) {
         alert('Maximum of 4 referees allowed in this room.');
         return;
       }
 
-      // Atomically claim the next sequential number
+      // Atomically claim next sequential referee number
       const counterResult = await runTransaction(
         dbRef(db, `rooms/${trimmedCode}/refereeCounter`),
         (current) => (current || 0) + 1,
       );
 
-      if (!counterResult.committed) {
-        throw new Error('Failed to claim referee number');
-      }
+      if (!counterResult.committed) throw new Error('Failed to claim referee number');
 
       const assignedNumber = counterResult.snapshot.val();
-      const myName = refereeName.trim() || `Referee ${assignedNumber}`;
+      const finalName = displayName || `Referee ${assignedNumber}`;
 
       await set(dbRef(db, `rooms/${trimmedCode}/referees/${refereeId}`), {
         joined: Date.now(),
-        name: myName,
+        name: finalName,
         number: assignedNumber,
       });
 
-      setLoggedIn(trimmedCode, myName);
+      setLoggedIn(trimmedCode, finalName);
       requestFullscreen();
       navigate('/scoring');
     } catch (err) {
@@ -92,12 +93,25 @@ export default function RoomEntry() {
   return (
     <div id="roomEntry">
       <h2>Enter Room Code</h2>
-      <input
-        type="text"
-        placeholder="Your name (optional)"
-        value={refereeName}
-        onChange={(e) => setRefereeName(e.target.value)}
-      />
+
+      {/* Referee name — shows assigned/custom name, tap to edit */}
+      {editingName ? (
+        <input
+          type="text"
+          className="name-input"
+          placeholder="Enter your name"
+          value={customName}
+          autoFocus
+          onChange={(e) => setCustomName(e.target.value)}
+          onBlur={() => setEditingName(false)}
+          onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
+        />
+      ) : (
+        <button className="name-button" onClick={() => setEditingName(true)}>
+          {displayName || 'Tap to set name'}
+        </button>
+      )}
+
       <input
         type="text"
         placeholder="e.g., 3F6XKP"
