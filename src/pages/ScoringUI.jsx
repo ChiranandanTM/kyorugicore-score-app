@@ -114,7 +114,10 @@ export default function ScoringUI() {
         return;
       }
 
-      if (dx > 80 && dx > dy * 1.5 && duration < 500) {
+      // Require: 130px+ horizontal, clearly more horizontal than vertical (2.5x),
+      // fast enough to be intentional (not slow finger drift), and within 500ms
+      const speed = dx / (duration || 1)
+      if (dx > 130 && dx > dy * 2.5 && speed > 0.3 && duration < 500) {
         const cfg = SECTION_CONFIGS.find((c) => target.classList.contains(c.cls) && c.swipePoints);
         if (cfg) {
           submitPoints(roomIdRef.current, refereeIdRef.current, myNameRef.current, target, cfg.player, cfg.swipePoints, cfg.swipeAction);
