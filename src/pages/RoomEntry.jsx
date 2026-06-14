@@ -8,13 +8,8 @@ import QRScanner from '../components/QRScanner';
 export default function RoomEntry() {
   const [roomCode, setRoomCode] = useState('');
   const [showScanner, setShowScanner] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [customName, setCustomName] = useState('');
   const navigate = useNavigate();
-  const { refereeId, myName, setLoggedIn } = useStore();
-
-  // Show custom name if typed, else stored name, else placeholder
-  const displayName = customName || myName || '';
+  const { refereeId, setLoggedIn } = useStore();
 
   async function joinRoom(code) {
     const trimmedCode = (code || '').trim().toUpperCase();
@@ -32,9 +27,9 @@ export default function RoomEntry() {
 
       const referees = roomSnap.val()?.referees || {};
 
-      // Already in room — update name if changed, then proceed
+      // Already in room — rejoin with existing name
       if (referees[refereeId]) {
-        const finalName = displayName || referees[refereeId].name;
+        const finalName = referees[refereeId].name;
         await set(dbRef(db, `rooms/${trimmedCode}/referees/${refereeId}`), {
           ...referees[refereeId],
           name: finalName,
@@ -59,7 +54,7 @@ export default function RoomEntry() {
       if (!counterResult.committed) throw new Error('Failed to claim referee number');
 
       const assignedNumber = counterResult.snapshot.val();
-      const finalName = displayName || `Referee ${assignedNumber}`;
+      const finalName = `Referee ${assignedNumber}`;
 
       await set(dbRef(db, `rooms/${trimmedCode}/referees/${refereeId}`), {
         joined: Date.now(),
@@ -93,25 +88,6 @@ export default function RoomEntry() {
   return (
     <div id="roomEntry">
       <h2>Enter Room Code</h2>
-
-      {/* Referee name — shows assigned/custom name, tap to edit */}
-      {editingName ? (
-        <input
-          type="text"
-          className="name-input"
-          placeholder="Enter your name"
-          value={customName}
-          autoFocus
-          onChange={(e) => setCustomName(e.target.value)}
-          onBlur={() => setEditingName(false)}
-          onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
-        />
-      ) : (
-        <button className="name-button" onClick={() => setEditingName(true)}>
-          {displayName || 'Tap to set name'}
-        </button>
-      )}
-
       <input
         type="text"
         placeholder="e.g., 3F6XKP"
